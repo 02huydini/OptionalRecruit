@@ -6,7 +6,7 @@ using HarmonyLib;
 
 namespace OptionalRecruit {
     [BepInPlugin("02dumbass.optionalrecruit", "OptionalRecruit", "0.1")]
-    [BepInDependency("KrokoshaCasualtiesMP")]
+    [BepInDependency("CasualtiesMP")]
     public class OptionalRecruit : BaseUnityPlugin {
         internal static ManualLogSource log;
         internal static OptionalRecruit Instance;
@@ -61,7 +61,7 @@ namespace OptionalRecruit {
             }
         }
         void VerifyRefs() {
-            if (KrokRefs.patchType == null) DebugLog.Error("KrokoshaCasualtiesMP.PlayerCamera_ToggleTradeMenu_MultiplayerPatch not found - wrong KrokMP version?");
+            if (KrokRefs.patchType == null) DebugLog.Error("Together.PlayerCamera_ToggleTradeMenu_MultiplayerPatch not found - wrong CasualtiesMP version (expected 5.0.2)?");
             if (KrokRefs.recruitButtonField == null) DebugLog.Error("RECRUITButton field not found on PlayerCamera_ToggleTradeMenu_MultiplayerPatch.");
             if (KrokRefs.eligibleMethod == null) DebugLog.Error("GetPlayersEligibleForRespawn method not found on PlayerCamera_ToggleTradeMenu_MultiplayerPatch.");
         }

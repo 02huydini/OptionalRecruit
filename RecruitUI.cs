@@ -5,7 +5,7 @@ using LiteNetLib.Utils;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace OptionalRecruit {
     internal static class RecruitUI {
@@ -26,7 +26,7 @@ namespace OptionalRecruit {
                 if (players.Count == 0) return;
                 bool found = false;
                 foreach (var p in players) {
-                    if (p.clientId.id == chosenKnetId) found = true;
+                    if (p.playerId.id == chosenKnetId) found = true;
                 }
                 float total = HeaderHeight + (collapsed ? 0f : (players.Count + 1) * RowHeight);
                 Transform inv = cam.traderInventory;
@@ -40,7 +40,7 @@ namespace OptionalRecruit {
                     AddRow(inv, y, null, !found);
                     y += RowHeight;
                     foreach (var p in players) {
-                        AddRow(inv, y, p, found && p.clientId.id == chosenKnetId);
+                        AddRow(inv, y, p, found && p.playerId.id == chosenKnetId);
                         y += RowHeight;
                     }
                 }
@@ -52,12 +52,12 @@ namespace OptionalRecruit {
                 DebugLog.Error("Recruit tab build failed (further failures not logged): " + e);
             }
         }
-        static List<NetPlayer> GetPlayers() {
-            var result = new List<NetPlayer>();
+        static List<ScavPlayer> GetPlayers() {
+            var result = new List<ScavPlayer>();
             var list = KrokRefs.GetEligible();
             if (list == null) return result;
             foreach (var item in list) {
-                var p = item as NetPlayer;
+                var p = item as ScavPlayer;
                 if (p != null) result.Add(p);
             }
             return result;
@@ -78,7 +78,7 @@ namespace OptionalRecruit {
             var arrowBtn = arrow.GetComponent<Button>();
             if (arrowBtn != null) arrowBtn.onClick.AddListener(delegate { ToggleCollapsed(); });
         }
-        static void AddRow(Transform inv, float y, NetPlayer plr, bool selected) {
+        static void AddRow(Transform inv, float y, ScavPlayer plr, bool selected) {
             var row = Utils.Create("Special/TraderItemPanel", inv);
             if (row.transform.childCount < 8) {
                 DebugLog.Warn("TraderItemPanel has " + row.transform.childCount + " children, expected 8; row skipped.");
@@ -86,15 +86,15 @@ namespace OptionalRecruit {
                 return;
             }
             row.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -y);
-            ushort id = plr == null ? ushort.MaxValue : plr.clientId.id;
+            ushort id = plr == null ? ushort.MaxValue : plr.playerId.id;
             Color plrColor = Color.white;
-            if (plr != null) plrColor = plr.plrcolor;
-            string name = plr == null ? "Automatic" : id + ": " + plr.playername;
+            if (plr != null) plrColor = plr.playerColor;
+            string name = plr == null ? "Automatic" : id + ": " + plr.playerName;
             string desc = plr == null ? "Let the Host pick the most suitable dead player." : "Respawn this player when Recruit is pressed.";
             var fill = row.transform.GetChild(0).GetComponent<Image>();
             if (fill != null) fill.enabled = false;
             var icon = row.transform.GetChild(1).GetComponent<Image>();
-            Texture2D tex = plr == null ? null : plr.profilepic_any_smalltolarge;
+            Texture2D tex = plr == null ? null : plr.IconAnySmallToLarge;
             if (icon != null) {
                 if (tex != null) {
                     icon.enabled = true;
@@ -151,7 +151,7 @@ namespace OptionalRecruit {
         static void Select(ushort id) {
             DebugLog.Info("Recruit tab clicked: player ID " + (id == ushort.MaxValue ? "auto" : id.ToString()));
             chosenKnetId = id;
-            SendArm(RecruitArm.UiArmMsgId, id);
+            SendArm(RecruitArm.UiArmName, id);
             Rebuild();
         }
         static bool CooldownReady(out float remaining) {
@@ -166,12 +166,12 @@ namespace OptionalRecruit {
             }
             lastCommandTime = Time.realtimeSinceStartup;
             chosenKnetId = knetId;
-            SendArm(RecruitArm.ArmMsgId, knetId);
+            SendArm(RecruitArm.ArmName, knetId);
             Rebuild();
         }
-        static void SendArm(ushort msgId, ushort knetId) {
+        static void SendArm(string name, ushort knetId) {
             try {
-                NetDataWriter writer = Net.CreateWriter(msgId);
+                NetDataWriter writer = Multiplayer.CreateNamedWriter(name);
                 writer.Put(knetId);
                 Net.Client_Send(DeliveryMethod.ReliableUnordered, writer);
             } catch (Exception e) {

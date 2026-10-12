@@ -4,35 +4,31 @@ using System.Collections.Generic;
 using System.Reflection;
 using BepInEx.Configuration;
 using HarmonyLib;
-using LiteNetLib;
 using LiteNetLib.Utils;
-using KrokoshaCasualtiesMP;
+using Together;
 
 namespace OptionalRecruit {
     internal static class KrokRefs {
-        internal static readonly System.Type patchType = AccessTools.TypeByName("KrokoshaCasualtiesMP.PlayerCamera_ToggleTradeMenu_MultiplayerPatch");
+        internal static readonly System.Type patchType = AccessTools.TypeByName("Together.PlayerCamera_ToggleTradeMenu_MultiplayerPatch");
         internal static readonly FieldInfo recruitButtonField = AccessTools.Field(patchType, "RECRUITButton");
         internal static readonly MethodInfo eligibleMethod = AccessTools.Method(patchType, "GetPlayersEligibleForRespawn");
         internal static IList GetEligible() {
             if (eligibleMethod == null) return null;
             return eligibleMethod.Invoke(null, null) as IList;
         }
-        internal static string PlayerName(object netPlayer) {
-            if (netPlayer == null) return "?";
-            var f = AccessTools.Field(netPlayer.GetType(), "playername");
-            if (f != null) return f.GetValue(netPlayer) as string ?? "?";
-            return netPlayer.ToString();
+        internal static string PlayerName(object player) {
+            var p = player as ScavPlayer;
+            return p == null ? "?" : p.playerName;
         }
-        internal static ushort PlayerKnetId(object netPlayer) {
-            if (netPlayer == null) return ushort.MaxValue;
-            var p = netPlayer as NetPlayer;
-            if (p != null) return p.clientId.id;
+        internal static ushort PlayerKnetId(object player) {
+            var p = player as ScavPlayer;
+            if (p != null) return p.playerId.id;
             return ushort.MaxValue;
         }
     }
     internal static class RecruitArm {
-        internal const ushort ArmMsgId = 60173;
-        internal const ushort UiArmMsgId = 60174;
+        internal const string ArmName = "OptionalRecruit.Arm";
+        internal const string UiArmName = "OptionalRecruit.UiArm";
         internal const double CommandCooldownSeconds = 10.0;
         internal const ushort None = ushort.MaxValue;
         internal const ushort HostRequesterId = 0;
@@ -74,11 +70,11 @@ namespace OptionalRecruit {
         }
         internal static void RegisterReceiver() {
             try {
-                ServerMain.RegisterServerReceiver(ArmMsgId, OnArmReceived);
-                ServerMain.RegisterServerReceiver(UiArmMsgId, OnUiArmReceived);
-                DebugLog.Info("Registered custom netmsg " + ArmMsgId + " (console/command, cooldown) and " + UiArmMsgId + " (UI, no cooldown).");
+                Multiplayer.RegisterCustomServerReceiver(ArmName, OnArmReceived);
+                Multiplayer.RegisterCustomServerReceiver(UiArmName, OnUiArmReceived);
+                DebugLog.Info("Registered custom messages \"" + ArmName + "\" (console/command, cooldown) and \"" + UiArmName + "\" (UI, no cooldown).");
             } catch (Exception e) {
-                DebugLog.Error("Failed to register custom netmsgs " + ArmMsgId + "/" + UiArmMsgId + ": " + e);
+                DebugLog.Error("Failed to register custom messages " + ArmName + "/" + UiArmName + ": " + e);
             }
         }
         static void Apply(ushort requester, ushort kid, string source) {
@@ -90,23 +86,23 @@ namespace OptionalRecruit {
                 DebugLog.Info("Recruit target armed: player ID " + kid + " for requester " + requester + " (" + source + ")");
             }
         }
-        static void OnArmReceived(knetid clientId, ref NetDataReader reader) {
+        static void OnArmReceived(ScavPlayer player, NetDataReader reader) {
             try {
+                ushort requester = player.playerId.id;
                 ushort kid = reader.GetUShort();
                 double remaining;
-                if (!TryBeginCommand(clientId.id, out remaining)) {
-                    DebugLog.Info("Recruit arm from requester " + clientId.id + " ignored, cooldown " + remaining.ToString("0.0") + "s left.");
+                if (!TryBeginCommand(requester, out remaining)) {
+                    DebugLog.Info("Recruit arm from requester " + requester + " ignored, cooldown " + remaining.ToString("0.0") + "s left.");
                     return;
                 }
-                Apply(clientId.id, kid, "command");
+                Apply(requester, kid, "command");
             } catch (Exception e) {
                 DebugLog.Error("OnArmReceived failed: " + e);
             }
         }
-        static void OnUiArmReceived(knetid clientId, ref NetDataReader reader) {
+        static void OnUiArmReceived(ScavPlayer player, NetDataReader reader) {
             try {
-                ushort kid = reader.GetUShort();
-                Apply(clientId.id, kid, "UI");
+                Apply(player.playerId.id, reader.GetUShort(), "UI");
             } catch (Exception e) {
                 DebugLog.Error("OnUiArmReceived failed: " + e);
             }
@@ -126,11 +122,11 @@ namespace OptionalRecruit {
         }
         internal static void SendPrivateReply(knetid target, string message) {
             try {
-                NetPlayer player;
-                if (NetPlayer.TryGetPlayerFromClientId(target, out player) && player != null) {
+                ScavPlayer player;
+                if (ScavPlayer.TryGetPlayerFromClientId(target, out player) && player != null) {
                     player.Server_DoAlertSingle(message, false, true);
                 } else {
-                    DebugLog.Warn("SendPrivateReply: could not resolve NetPlayer for client " + target);
+                    DebugLog.Warn("SendPrivateReply: could not resolve ScavPlayer for client " + target);
                 }
             } catch (Exception e) {
                 DebugLog.Error("SendPrivateReply failed: " + e);
@@ -140,30 +136,35 @@ namespace OptionalRecruit {
     [HarmonyPatch]
     internal static class Patch_ServerChatMessage {
         static MethodBase TargetMethod() {
-            var m = AccessTools.Method(AccessTools.TypeByName("KrokoshaCasualtiesMP.Chat"), "Server_PlayerChatMessageSend");
+            var m = AccessTools.Method(typeof(Chat), "Server_PlayerChatMessageSend");
             if (m == null) DebugLog.Error("TargetMethod not found: Chat.Server_PlayerChatMessageSend");
             return m;
         }
-        static bool Prefix(knetid clientId, ref NetDataReader reader) {
+        static bool Prefix(knetid clientId, NetDataReader reader) {
             try {
                 int len = reader.AvailableBytes;
                 byte[] copy = new byte[len];
                 Array.Copy(reader.RawData, reader.Position, copy, 0, len);
                 string msg = null;
+                bool team = false;
+                bool whisper = false;
                 try {
                     var peek = new NetDataReader(copy);
-                    bool discard;
-                    peek.Get(out discard);
+                    team = peek.GetBool();
+                    whisper = peek.GetBool();
+                    peek.GetUShort();
                     msg = peek.GetString();
                 } catch (Exception e) {
                     DebugLog.Warn("Chat peek parse failed: " + e.Message);
                 }
-                if (msg == null) return true;
+                if (msg == null || team || whisper) return true;
                 ushort targetKnetId;
                 if (!ChatRecruit.TryParseRecruitCommand(msg, out targetKnetId)) {
                     DebugLog.Verbose("Chat (not a command): \"" + msg + "\"");
                     return true;
                 }
+                ScavPlayer sender;
+                if (ScavPlayer.TryGetPlayerFromClientId(clientId, out sender) && sender != null && sender.server_mute_tc) return true;
                 double remaining;
                 if (!RecruitArm.TryBeginCommand(clientId.id, out remaining)) {
                     ChatRecruit.SendPrivateReply(clientId, "Recruit command on cooldown, " + Math.Ceiling(remaining) + "s left.");
@@ -193,7 +194,7 @@ namespace OptionalRecruit {
             if (m == null) DebugLog.Error("TargetMethod not found: Server_SelectMostSuitablePlayerToRespawn");
             return m;
         }
-        static bool Prefix(ref object __result) {
+        static bool Prefix(ref ScavPlayer __result) {
             ushort requester = RecruitArm.activeRequester;
             if (requester == RecruitArm.None) return true;
             ushort kid;
@@ -203,8 +204,8 @@ namespace OptionalRecruit {
             if (list != null) {
                 foreach (var item in list) {
                     if (KrokRefs.PlayerKnetId(item) == kid) {
-                        __result = item;
-                        DebugLog.Info("Recruit override (requester " + requester + ", " + source + " target player ID " + kid + ") -> " + KrokRefs.PlayerName(__result));
+                        __result = (ScavPlayer)item;
+                        DebugLog.Info("Recruit override (requester " + requester + ", " + source + " target player ID " + kid + ") -> " + KrokRefs.PlayerName(item));
                         return false;
                     }
                 }

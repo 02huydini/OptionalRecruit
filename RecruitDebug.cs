@@ -2,7 +2,8 @@
 using System.Reflection;
 using BepInEx.Configuration;
 using HarmonyLib;
-using KrokoshaCasualtiesMP;
+using System.Collections.Generic;
+using Together;
 
 namespace OptionalRecruit {
     internal class RecruitDebug : RecruitLog {
@@ -28,7 +29,7 @@ namespace OptionalRecruit {
         internal static void RegisterAll() {
             if (ConsoleScript.SearchExact("recruit") != null) return;
             try {
-                Con.RegisterCommand(new Command("recruit", "OptionalRecruit - recruit a specific dead player by KrokMP player ID (usage: recruit <player ID>, or just 'recruit' to clear and use auto-select).", delegate (string[] splited) {
+                Con.RegisterCommand_LocalOnly(new Command("recruit", "OptionalRecruit - recruit a specific dead player by player ID (usage: recruit <player ID>, or just 'recruit' to clear and use auto-select).", delegate (string[] splited) {
                     HandleRecruitCommand(splited);
                 }, null, Array.Empty<ValueTuple<string, string>>()));
                 DebugLog.Info("Registered console command 'recruit'.");
@@ -60,23 +61,26 @@ namespace OptionalRecruit {
     [HarmonyPatch(typeof(Chat), "CheckForCommandInMessageInput")]
     internal static class Patch_Chat_CheckForCommand {
         static readonly FieldInfo inputField = AccessTools.Field(typeof(Chat), "CHAT_current_input");
-        static void Postfix(bool __result) {
-            if (!__result) return;
+        static readonly HashSet<string> reserved = new HashSet<string> { "?", "help", "clear", "team", "t", "whisper", "w", "me" };
+        static bool Prefix(ref bool __result) {
             try {
                 string input = inputField == null ? null : inputField.GetValue(null) as string;
-                if (string.IsNullOrWhiteSpace(input) || !input.StartsWith("/")) return;
+                if (string.IsNullOrWhiteSpace(input) || !input.StartsWith("/")) return true;
                 string cmd = input.Substring(1).Trim();
-                if (cmd.Length == 0) return;
+                if (cmd.Length == 0) return true;
                 string name = cmd.Split(' ')[0];
-                if (name == "clear" || name == "?" || name == "help") return;
-                if (ConsoleScript.SearchExact(name) == null) return;
+                if (reserved.Contains(name)) return true;
+                if (ConsoleScript.SearchExact(name) == null) return true;
                 if (ConsoleScript.instance == null) {
                     DebugLog.Warn("ConsoleScript.instance is null; cannot route chat command to console.");
-                    return;
+                    return true;
                 }
                 Con.RunCommand(cmd);
+                __result = true;
+                return false;
             } catch (System.Exception e) {
                 DebugLog.Error("Chat command execution failed: " + e);
+                return true;
             }
         }
     }

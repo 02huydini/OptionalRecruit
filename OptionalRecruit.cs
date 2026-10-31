@@ -5,8 +5,8 @@ using BepInEx.Logging;
 using HarmonyLib;
 
 namespace OptionalRecruit {
-    [BepInPlugin("02dumbass.optionalrecruit", "OptionalRecruit", "0.1")]
-    [BepInDependency("CasualtiesMP")]
+    [BepInPlugin("02dumbass.optionalrecruit", "OptionalRecruit", "0.2.2")]
+    [BepInDependency("CasualtiesMP", "5.2.0")]
     public class OptionalRecruit : BaseUnityPlugin {
         internal static ManualLogSource log;
         internal static OptionalRecruit Instance;
@@ -22,7 +22,7 @@ namespace OptionalRecruit {
             var harmony = new Harmony("02dumbass.optionalrecruit");
             PatchSafe(harmony, typeof(Patch_RefreshTraderInventories));
             PatchSafe(harmony, typeof(Patch_Server_SelectMostSuitablePlayerToRespawn));
-            PatchSafe(harmony, typeof(Patch_ServerReceiver_RecruitPressed_Scope));
+            PatchSafe(harmony, typeof(Patch_PerformRecruit_Scope));
             PatchSafe(harmony, typeof(Patch_ServerChatMessage));
             PatchSafe(harmony, typeof(Patch_ConsoleScript_RegisterSpawnEntities_Guard));
             PatchOptional(harmony, "OptionalRecruit.Patch_ConsoleScript_RegisterAllCommands_Recruit");
@@ -34,7 +34,10 @@ namespace OptionalRecruit {
         static void TryUpgradeDebugLog() {
             if (!DebugEnabled) return;
             var richType = Type.GetType("OptionalRecruit.RecruitDebug");
-            if (richType == null || !typeof(RecruitLog).IsAssignableFrom(richType)) return;
+            if (richType == null || !typeof(RecruitLog).IsAssignableFrom(richType)) {
+                log.LogWarning("General.Debug is on but the RecruitDebug type was not found in this build, so no [debug] lines will appear.");
+                return;
+            }
             try {
                 DebugLog.Sink = (RecruitLog)Activator.CreateInstance(richType);
             } catch (Exception e) {
@@ -61,14 +64,18 @@ namespace OptionalRecruit {
             }
         }
         void VerifyRefs() {
-            if (KrokRefs.patchType == null) DebugLog.Error("Together.PlayerCamera_ToggleTradeMenu_MultiplayerPatch not found - wrong CasualtiesMP version (expected 5.0.2)?");
+            if (KrokRefs.patchType == null) DebugLog.Error("Together.PlayerCamera_ToggleTradeMenu_MultiplayerPatch not found - wrong CasualtiesMP version (expected 5.2.0)?");
             if (KrokRefs.recruitButtonField == null) DebugLog.Error("RECRUITButton field not found on PlayerCamera_ToggleTradeMenu_MultiplayerPatch.");
+            if (KrokRefs.performRecruit == null) DebugLog.Error("PerformRecruit method not found on PlayerCamera_ToggleTradeMenu_MultiplayerPatch (needs CasualtiesMP 5.2.0).");
+            if (KrokRefs.actorProp == null) DebugLog.Error("TraderCommit.Actor property not found (needs CasualtiesMP 5.2.0).");
             if (KrokRefs.eligibleMethod == null) DebugLog.Error("GetPlayersEligibleForRespawn method not found on PlayerCamera_ToggleTradeMenu_MultiplayerPatch.");
         }
     }
     internal class RecruitLog {
         public virtual void Info(string msg) { }
         public virtual void Verbose(string msg) { }
+        public virtual void Once(string key, string msg) { }
+        public virtual void Dump(UnityEngine.GameObject root) { }
     }
     internal static class DebugLog {
         internal static ManualLogSource src;
@@ -81,6 +88,12 @@ namespace OptionalRecruit {
         }
         internal static void Verbose(string msg) {
             Sink.Verbose(msg);
+        }
+        internal static void Once(string key, string msg) {
+            Sink.Once(key, msg);
+        }
+        internal static void Dump(UnityEngine.GameObject root) {
+            Sink.Dump(root);
         }
         internal static void Warn(string msg) {
             if (src != null) src.LogWarning(msg);

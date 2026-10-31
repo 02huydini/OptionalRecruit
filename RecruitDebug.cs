@@ -4,16 +4,42 @@ using BepInEx.Configuration;
 using HarmonyLib;
 using System.Collections.Generic;
 using Together;
+using System.Text;
+using UnityEngine;
 
 namespace OptionalRecruit {
     internal class RecruitDebug : RecruitLog {
         const string TAG = "[debug] ";
         readonly ConfigEntry<bool> verboseEntry;
+        readonly ConfigEntry<bool> uiEntry;
+        string lastOnceKey;
+        bool dumped;
         public RecruitDebug() {
+            uiEntry = OptionalRecruit.Instance.Config.Bind("General", "DebugUI", false, "With Debug on, log why the recruit tab is built or skipped (each change once) and dump the TraderItemPanel hierarchy once.");
             verboseEntry = OptionalRecruit.Instance.Config.Bind("General", "DebugVerbose", false, "With Debug on, also log high-volume lines (every chat message that is not a recruit command).");
         }
         public override void Info(string msg) {
             if (DebugLog.src != null) DebugLog.src.LogInfo(TAG + msg);
+        }
+        public override void Once(string key, string msg) {
+            if (!uiEntry.Value || DebugLog.src == null || key == lastOnceKey) return;
+            lastOnceKey = key;
+            DebugLog.src.LogInfo(TAG + msg);
+        }
+        public override void Dump(GameObject root) {
+            if (!uiEntry.Value || dumped || root == null || DebugLog.src == null) return;
+            dumped = true;
+            var sb = new StringBuilder("TraderItemPanel hierarchy:");
+            DumpNode(root.transform, 0, sb);
+            DebugLog.src.LogInfo(TAG + sb);
+        }
+        static void DumpNode(Transform t, int depth, StringBuilder sb) {
+            sb.Append("\n").Append(new string(' ', depth * 2)).Append(t.name).Append(t.gameObject.activeSelf ? "" : " (inactive)").Append(" [");
+            foreach (var c in t.GetComponents<Component>()) sb.Append(c == null ? "null" : c.GetType().Name).Append(' ');
+            var rt = t as RectTransform;
+            if (rt != null) sb.Append("size=").Append(rt.sizeDelta);
+            sb.Append(']');
+            for (int i = 0; i < t.childCount; i++) DumpNode(t.GetChild(i), depth + 1, sb);
         }
         public override void Verbose(string msg) {
             if (verboseEntry.Value && DebugLog.src != null) DebugLog.src.LogInfo(TAG + msg);

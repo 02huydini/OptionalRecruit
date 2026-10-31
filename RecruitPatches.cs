@@ -12,6 +12,15 @@ namespace OptionalRecruit {
         internal static readonly System.Type patchType = AccessTools.TypeByName("Together.PlayerCamera_ToggleTradeMenu_MultiplayerPatch");
         internal static readonly FieldInfo recruitButtonField = AccessTools.Field(patchType, "RECRUITButton");
         internal static readonly MethodInfo eligibleMethod = AccessTools.Method(patchType, "GetPlayersEligibleForRespawn");
+        internal static readonly System.Type commitType = AccessTools.TypeByName("Together.TraderCommit");
+        internal static readonly PropertyInfo actorProp = AccessTools.Property(commitType, "Actor");
+        internal static readonly MethodInfo performRecruit = AccessTools.Method(patchType, "PerformRecruit");
+        internal static ushort ActorRequester() {
+            Body b = actorProp == null ? null : actorProp.GetValue(null, null) as Body;
+            if (b == null) return ushort.MaxValue;
+            ScavPlayer p = ScavPlayer.GetPlayerFromBody(b);
+            return p == null ? ushort.MaxValue : p.playerId.id;
+        }
         internal static IList GetEligible() {
             if (eligibleMethod == null) return null;
             return eligibleMethod.Invoke(null, null) as IList;
@@ -215,18 +224,23 @@ namespace OptionalRecruit {
         }
     }
     [HarmonyPatch]
-    internal static class Patch_ServerReceiver_RecruitPressed_Scope {
+    internal static class Patch_PerformRecruit_Scope {
         static MethodBase TargetMethod() {
-            var m = AccessTools.Method(KrokRefs.patchType, "ServerReceiver_RecruitPressed");
-            if (m == null) DebugLog.Error("TargetMethod not found: ServerReceiver_RecruitPressed");
+            var m = KrokRefs.performRecruit;
+            if (m == null) DebugLog.Error("TargetMethod not found: PerformRecruit");
             return m;
         }
-        static void Prefix(knetid clientId) {
-            RecruitArm.activeRequester = clientId.id;
+        static void Prefix() {
+            ushort requester = KrokRefs.ActorRequester();
+            RecruitArm.activeRequester = requester;
+            if (requester == RecruitArm.None) {
+                DebugLog.Warn("Recruit click: could not resolve the requester from TraderCommit.Actor, auto-select will be used.");
+                return;
+            }
             ushort armed;
             string source;
-            bool has = RecruitArm.ResolveTarget(clientId.id, out armed, out source);
-            DebugLog.Info("Recruit click from requester " + clientId.id + ", target: " + (has ? armed.ToString() + " (" + source + ")" : "auto"));
+            bool has = RecruitArm.ResolveTarget(requester, out armed, out source);
+            DebugLog.Info("Recruit click from requester " + requester + ", target: " + (has ? armed.ToString() + " (" + source + ")" : "auto"));
         }
         static void Finalizer() {
             RecruitArm.activeRequester = RecruitArm.None;

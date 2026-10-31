@@ -19,11 +19,25 @@ namespace OptionalRecruit {
         static float lastCommandTime = -1000f;
         internal static void Build(PlayerCamera cam) {
             try {
-                if (cam == null || cam.tradeMenu == null || !cam.tradeMenu.activeSelf || cam.currentTrader == null || cam.traderInventory == null) return;
+                if (cam == null || cam.tradeMenu == null || !cam.tradeMenu.activeSelf) return;
+                if (cam.currentTrader == null || cam.traderInventory == null) {
+                    DebugLog.Once("skip-trader", "Recruit tab skipped: currentTrader or traderInventory is null.");
+                    return;
+                }
                 var btn = KrokRefs.recruitButtonField == null ? null : KrokRefs.recruitButtonField.GetValue(null) as GameObject;
-                if (btn == null || !btn.activeSelf) return;
+                if (btn == null) {
+                    DebugLog.Once("skip-btn-null", "Recruit tab skipped: RECRUITButton " + (KrokRefs.recruitButtonField == null ? "field not found" : "is null"));
+                    return;
+                }
+                if (!btn.activeSelf) {
+                    DebugLog.Once("skip-btn-inactive", "Recruit tab skipped: Recruit button inactive (revive rule off).");
+                    return;
+                }
                 var players = GetPlayers();
-                if (players.Count == 0) return;
+                if (players.Count == 0) {
+                    DebugLog.Once("skip-nodead", "Recruit tab skipped: no eligible dead players (GetEligible " + (KrokRefs.GetEligible() == null ? "returned null" : "empty") + ").");
+                    return;
+                }
                 bool found = false;
                 foreach (var p in players) {
                     if (p.playerId.id == chosenKnetId) found = true;
@@ -46,6 +60,7 @@ namespace OptionalRecruit {
                 }
                 var invRt = inv.GetComponent<RectTransform>();
                 invRt.sizeDelta = new Vector2(invRt.sizeDelta.x, invRt.sizeDelta.y + total);
+                DebugLog.Once("built-" + players.Count + "-" + collapsed + "-" + chosenKnetId, "Recruit tab built: " + players.Count + " player(s), collapsed=" + collapsed + ", chosen=" + chosenKnetId + ", inventory children=" + inv.childCount + ", panel height=" + invRt.sizeDelta.y);
             } catch (Exception e) {
                 if (buildErrorLogged) return;
                 buildErrorLogged = true;
@@ -85,12 +100,13 @@ namespace OptionalRecruit {
                 UnityEngine.Object.Destroy(row);
                 return;
             }
+            DebugLog.Dump(row);
             row.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -y);
             ushort id = plr == null ? ushort.MaxValue : plr.playerId.id;
             Color plrColor = Color.white;
             if (plr != null) plrColor = plr.playerColor;
             string name = plr == null ? "Automatic" : id + ": " + plr.playerName;
-            string desc = plr == null ? "Let the Host pick the most suitable dead player." : "Respawn this player when Recruit is pressed.";
+            string desc = plr == null ? "Random." : "";
             var fill = row.transform.GetChild(0).GetComponent<Image>();
             if (fill != null) fill.enabled = false;
             var icon = row.transform.GetChild(1).GetComponent<Image>();
@@ -116,6 +132,7 @@ namespace OptionalRecruit {
             SetText(row.transform.GetChild(4), selected ? "Selected" : "", null);
             SetText(row.transform.GetChild(5), "", null);
             var buy = row.transform.GetChild(6).GetComponent<Button>();
+            if (buy == null) DebugLog.Once("row-nobuy", "TraderItemPanel child 6 has no Button, row cannot be clicked.");
             if (buy != null) {
                 buy.onClick.AddListener(delegate { Select(id); });
                 var buyLabel = buy.GetComponentInChildren<TextMeshProUGUI>(true);
@@ -174,6 +191,7 @@ namespace OptionalRecruit {
                 NetDataWriter writer = Multiplayer.CreateNamedWriter(name);
                 writer.Put(knetId);
                 Net.Client_Send(DeliveryMethod.ReliableUnordered, writer);
+                DebugLog.Info("Sent " + name + " id " + (knetId == ushort.MaxValue ? "auto" : knetId.ToString()) + " (IsServer=" + Net.IsServer + ")");
             } catch (Exception e) {
                 DebugLog.Error("SendArm failed: " + e);
             }
